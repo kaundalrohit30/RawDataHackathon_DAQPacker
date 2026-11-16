@@ -1,0 +1,76 @@
+#ifndef __RecoLocalCalo_HGCalRecAlgos_ClusterTools_h__
+#define __RecoLocalCalo_HGCalRecAlgos_ClusterTools_h__
+
+#include <array>
+#include <cmath>
+#include <numeric>
+
+#include "RecoLocalCalo/HGCalRecAlgos/interface/TICLGeomTools.h"
+#include "DataFormats/HGCRecHit/interface/HGCRecHitCollections.h"
+#include "DataFormats/CaloRecHit/interface/CaloCluster.h"
+#include "DataFormats/ParticleFlowReco/interface/HGCalMultiCluster.h"
+#include "DataFormats/DetId/interface/DetIdFwd.h"
+#include "DataFormats/Common/interface/MultiSpan.h"
+
+#include "Geometry/CaloGeometry/interface/CaloGeometry.h"
+#include "Geometry/Records/interface/CaloGeometryRecord.h"
+
+#include "FWCore/ParameterSet/interface/ParameterSet.h"
+#include "FWCore/Framework/interface/ConsumesCollector.h"
+
+class HGCalGeometry;
+class HGCalDDDConstants;
+
+namespace edm {
+  class Event;
+  class EventSetup;
+}  // namespace edm
+
+namespace hgcal {
+  class ClusterTools {
+  public:
+    ClusterTools();
+    ClusterTools(const edm::ParameterSet &, edm::ConsumesCollector &);
+    ~ClusterTools() {}
+
+    void getEvent(const edm::Event &);
+    void getEventSetup(const edm::EventSetup &);
+
+    float getClusterHadronFraction(const reco::CaloCluster &) const;
+
+    math::XYZPoint getMultiClusterPosition(const reco::HGCalMultiCluster &) const;
+
+    int getLayer(const DetId) const;
+
+    double getMultiClusterEnergy(const reco::HGCalMultiCluster &) const;
+
+    // only for EE
+    bool getWidths(const reco::CaloCluster &clus,
+                   double &sigmaetaeta,
+                   double &sigmaphiphi,
+                   double &sigmaetaetalog,
+                   double &sigmaphiphilog) const;
+
+  private:
+    std::vector<size_t> sort_by_z(const reco::HGCalMultiCluster &v) const {
+      std::vector<size_t> idx(v.size());
+      std::iota(std::begin(idx), std::end(idx), 0);
+      sort(
+          idx.begin(), idx.end(), [&v](size_t i1, size_t i2) { return v.clusters()[i1]->z() < v.clusters()[i2]->z(); });
+      return idx;
+    }
+
+    ticlgeom::Tools rhtools_;
+    const edm::EDGetTokenT<HGCRecHitCollection> eetok, fhtok, bhtok;
+    const edm::EDGetTokenT<std::unordered_map<DetId, const unsigned int>> hitMapToken_;
+    const edm::ESGetToken<TICLGeomHost, CaloGeometryRecord> ticlGeomToken_;
+    const edm::ESGetToken<TICLGeomLookupHost, CaloGeometryRecord> ticlGeomLookupToken_;
+    const edm::ESGetToken<TICLGeomLayersHost, CaloGeometryRecord> ticlGeomLayersToken_;
+
+    const HGCRecHitCollection *eerh_, *fhrh_, *bhrh_;
+    const std::unordered_map<DetId, const unsigned int> *hitMap_;
+    std::unique_ptr<edm::MultiSpan<HGCRecHit>> rechitSpan_;
+  };
+}  // namespace hgcal
+
+#endif

@@ -1,0 +1,35 @@
+<use name="FWCore/Framework"/>
+<use name="FWCore/MessageLogger"/>
+<use name="FWCore/ParameterSet"/>
+<use name="FWCore/PluginManager"/>
+<use name="FWCore/Utilities"/>
+
+<use name="Geometry/HGCalMapping"/>
+<use name="RecoLocalCalo/HGCalRecAlgos"/>
+<use name="SimCalorimetry/HGCalSimAlgos"/>
+<use name="CondFormats/DataRecord"/>
+<use name="CondFormats/HGCalObjects"/>
+
+<use name="HGCalCommissioning/SystemTestEventFilters"/>
+
+<use name="CommonTools/UtilAlgos"/>
+<use name="FWCore/ServiceRegistry"/>
+<use name="root"/>
+<use name="rootcore"/>
+
+<library file="rawDataProducer_repacked.cc"
+         name="RawDataProducer_repackedPlugins">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+
+<library file="alpaka/*.cc" name="RawDataProducer_repackedRawDataProducer_repackedPluginsPortable">
+  <use name="alpaka"/>
+  <use name="json"/>
+  <use name="DataFormats/HGCalDigi"/>
+  <use name="DataFormats/Math"/>
+  <use name="HeterogeneousCore/AlpakaCore"/>
+  <use name="HeterogeneousCore/AlpakaInterface"/>
+  <flags ALPAKA_BACKENDS="1"/>
+  <flags EDM_PLUGIN="1"/>
+</library>
