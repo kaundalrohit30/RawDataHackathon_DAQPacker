@@ -131,7 +131,7 @@ private:
   //std::vector<std::vector<uint16_t>> adc_Threshold, adcm1_Threshold, toa_Threshold;
  
   std::vector<uint8_t> Orbit;
-  std::vector<uint32_t> cbBX, cbOrbit, fedObt;
+  std::vector<uint32_t> cbBX, cbOrbit, cbL1a, fedObt;
   std::vector<uint64_t> fedL1A;
 
 };
@@ -217,7 +217,6 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
   auto const& moduleIndex = iSetup.getData(moduleIndexTkn_);
   auto const& moduleInfo_view = moduleInfo.const_view();
 
-  int32_t nGoodDigis = 0;
   int32_t ndigis = 0;
   if(digis.isValid()){
   ndigis = digis->const_view().metadata().size();
@@ -277,7 +276,7 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
   std::vector<hgcal::econd::ERxData> allERxData(TotalERx);
   std::vector<hgcal::econd::ERxChannelEnable> enableMaps(TotalERx, hgcal::econd::ERxChannelEnable(37,false));
 
-  const std::vector<uint8_t> econd_status(ECONDidx.size(), hgcal::backend::ECONDPacketStatus::Normal); //for CB 
+  std::vector<uint8_t> econd_status(12, hgcal::backend::ECONDPacketStatus::InactiveECOND); //for CB 
 
   for (int32_t i = 0; i < ndenseIndices && digis.isValid(); i++) {
     //uint16_t TOT = digis_view.tot()[i];
@@ -337,7 +336,6 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
       allERxData.at(eRxNum).passZS.push_back((digis_view.adc()[i] > adc_Thr ? true : false));
       allERxData.at(eRxNum).passZSm1.push_back((digis_view.adcm1()[i] > adcm1_Thr ? true : false));
       
-      nGoodDigis++;
     }
 
     
@@ -357,6 +355,7 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
     //if(imod == 0){
     cbBX.push_back(econd.CBBX());
     cbOrbit.push_back(econd.CBOrbit());
+    cbL1a.push_back(econd.CBL1A());
     for(size_t ierx=0; ierx<nErx[imod]; ierx++){
       
       cm0.push_back(econd.cm().coeff(ierx,0));
@@ -388,12 +387,9 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
 
 
     struct ECONDGroup {
-      uint32_t econdID;
-      uint32_t cbID;
-      uint32_t slinkID;
-      uint32_t FedId;
-      uint32_t eRxNum;
-      uint16_t pLoad;
+      uint32_t econdID, cbID, slinkID, FedId, eRxNum, CBbx, CBL1A, CBOrbit;
+      uint16_t pLoad, econdBX, econdL1A;
+      uint8_t econdOrbit;
       bool pThrough;
       size_t startIndex;
       size_t chIndex;
@@ -414,6 +410,12 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
         group.FedId     = fedID[i];
         group.eRxNum    = nErx[i];
         group.pLoad     = payloadLength[i];
+        group.econdBX    = BX[i];
+        group.econdL1A   = L1A[i];
+        group.econdOrbit  = Orbit[i];
+        group.CBbx      = cbBX[i];
+        group.CBL1A    = cbL1a[i];
+        group.CBOrbit   = cbOrbit[i];
         group.pThrough  = econdPassThrough[i];
         group.startIndex = startIndex;
         group.chIndex = chIndex;
@@ -461,6 +463,12 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
     std::vector<uint16_t> new_cMode0;
     std::vector<uint16_t> new_cMode1;
     std::vector<uint16_t> new_payloadLength;
+    std::vector<uint16_t> new_econdBX;
+    std::vector<uint16_t> new_econdL1A;
+    std::vector<uint8_t> new_econdOrbit;
+    std::vector<uint32_t> new_CBbx;
+    std::vector<uint32_t> new_CBL1A;
+    std::vector<uint32_t> new_CBOrbit;
     std::vector<bool> new_passThrough;
 
     newERxNum.reserve(nErx.size());
@@ -473,6 +481,12 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
     new_cMode0.reserve(cm0.size());
     new_cMode1.reserve(cm1.size());
     new_payloadLength.reserve(payloadLength.size());
+    new_econdBX.reserve(BX.size());
+    new_econdL1A.reserve(L1A.size());
+    new_econdOrbit.reserve(Orbit.size());
+    new_CBbx.reserve(cbBX.size());
+    new_CBL1A.reserve(cbL1a.size());
+    new_CBOrbit.reserve(cbOrbit.size());
     new_passThrough.reserve(econdPassThrough.size());
 
     for (const auto& group : groups) {
@@ -484,6 +498,12 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
         newSLinkID.push_back(group.slinkID);
         newFedID.push_back(group.FedId);
         new_payloadLength.push_back(group.pLoad);
+        new_econdBX.push_back(group.econdBX);
+        new_econdL1A.push_back(group.econdL1A);
+        new_econdOrbit.push_back(group.econdOrbit);
+        new_CBbx.push_back(group.CBbx);
+        new_CBL1A.push_back(group.CBL1A);
+        new_CBOrbit.push_back(group.CBOrbit);
         new_passThrough.push_back(group.pThrough);
 
         // Copy this group's eRx entries
@@ -511,595 +531,18 @@ void rawDataProducer_repacked::produce(edm::Event& iEvent, const edm::EventSetup
     cm1 = std::move(new_cMode1);
     payloadLength = std::move(new_payloadLength);
     econdPassThrough = std::move(new_passThrough);
+    BX = std::move(new_econdBX);
+    L1A = std::move(new_econdL1A);
+    Orbit = std::move(new_econdOrbit);
+    cbBX = std::move(new_CBbx);
+    cbL1a = std::move(new_CBL1A);
+    cbOrbit = std::move(new_CBOrbit);
   //oooooooooOOOOOOOOOOOOOOOOOOOo==================oooooooooooOOOOOOOOOOOOOOOOOOOOO
-
-  // ============================================================
-// SORT ECOND DATA BY CBId AND ECONDid
-// Preserve mapping between ECOND metadata and eRx-level data
-// ============================================================
-
-
-// ------------------------------------------------------------
-// 1. Check the sizes of all ECOND-level vectors
-// ------------------------------------------------------------
-/*
-const size_t nECOND = cbIdx.size();
-
-if (ECONDidx.size() != nECOND ||
-    nErx.size() != nECOND ||
-    payloadLength.size() != nECOND ||
-    econdPassThrough.size() != nECOND
-    //BX.size() != nECOND ||
-    //L1A.size() != nECOND ||
-    //Orbit.size() != nECOND ||
-    //cbBX.size() != nECOND ||
-    //cbOrbit.size() != nECOND) {
-  ){
-
-    throw cms::Exception("SizeMismatch")
-        << "ECOND metadata vectors have different sizes!"
-        << "\ncbIdx = " << cbIdx.size()
-        << "\nECONDidx = " << ECONDidx.size()
-        << "\nnErx = " << nErx.size()
-        << "\npayloadLength = " << payloadLength.size()
-        << "\necondPassThrough = " << econdPassThrough.size();
-        //<< "\nBX = " << BX.size()
-        //<< "\nL1A = " << L1A.size()
-        //<< "\nOrbit = " << Orbit.size()
-        //<< "\ncbBX = " << cbBX.size()
-        //<< "\ncbOrbit = " << cbOrbit.size();
-}
-
-
-// ------------------------------------------------------------
-// 2. Calculate the original starting position of every ECOND
-//    in the eRx-level vectors
-// ------------------------------------------------------------
-
-std::vector<size_t> startIndex(nECOND);
-
-size_t totalERx = 0;
-
-for (size_t i = 0; i < nECOND; ++i) {
-
-    startIndex[i] = totalERx;
-
-    totalERx += nErx[i];
-}
-
-
-// ------------------------------------------------------------
-// 3. Check eRx-level vector sizes
-// ------------------------------------------------------------
-
-if (allERxData.size() != totalERx ||
-    enableMaps.size() != totalERx ||
-    cm0.size() != totalERx ||
-    cm1.size() != totalERx) {
-
-    throw cms::Exception("SizeMismatch")
-        << "eRx-level vectors have incorrect sizes!"
-        << "\nExpected total eRx = " << totalERx
-        << "\nallERxData = " << allERxData.size()
-        << "\nenableMaps = " << enableMaps.size()
-        << "\ncm0 = " << cm0.size()
-        << "\ncm1 = " << cm1.size();
-}
-
-
-// ------------------------------------------------------------
-// 4. Create an index permutation
-//
-//    Original vectors are NOT modified here.
-//
-//    Sorting priority:
-//    First  -> cbIdx
-//    Second -> ECONDidx
-// ------------------------------------------------------------
-
-std::vector<size_t> order(nECOND);
-
-std::iota(order.begin(), order.end(), 0);
-
-std::stable_sort(
-    order.begin(),
-    order.end(),
-    [&](size_t a, size_t b) {
-
-        if (cbIdx[a] != cbIdx[b]) {
-
-            return cbIdx[a] < cbIdx[b];
-        }
-
-        return ECONDidx[a] < ECONDidx[b];
-    }
-);
-
-
-// ------------------------------------------------------------
-// 5. Reorder eRx-level vectors
-//
-//    Each ECOND has a contiguous block of eRx entries.
-//    Move the complete block using the SAME permutation.
-// ------------------------------------------------------------
-
-auto reorderERx = [&](auto& vec) {
-
-    using VecType = std::decay_t<decltype(vec)>;
-
-    VecType sorted;
-
-    sorted.reserve(totalERx);
-
-    for (const size_t idx : order) {
-
-        const size_t first = startIndex[idx];
-
-        const size_t last = first + nErx[idx];
-
-        sorted.insert(
-            sorted.end(),
-            vec.begin() + first,
-            vec.begin() + last
-        );
-    }
-
-    vec = std::move(sorted);
-};
-
-
-// Reorder all eRx-level information
-
-reorderERx(allERxData);
-
-reorderERx(enableMaps);
-
-reorderERx(cm0);
-
-reorderERx(cm1);
-
-
-// ------------------------------------------------------------
-// 6. Reorder ECOND-level vectors
-//
-//    Every vector uses exactly the same permutation.
-// ------------------------------------------------------------
-
-auto reorderECOND = [&](auto& vec) {
-
-    using VecType = std::decay_t<decltype(vec)>;
-
-    VecType sorted;
-
-    sorted.reserve(nECOND);
-
-    for (const size_t idx : order) {
-
-        sorted.push_back(vec[idx]);
-    }
-
-    vec = std::move(sorted);
-};
-
-
-// Reorder CB and ECOND identifiers
-
-reorderECOND(cbIdx);
-
-reorderECOND(ECONDidx);
-
-
-// Reorder ECOND properties
-
-reorderECOND(nErx);
-
-reorderECOND(payloadLength);
-
-reorderECOND(econdPassThrough);
-
-
-// Reorder other ECOND-level metadata
-
-//reorderECOND(BX);
-//
-//reorderECOND(L1A);
-//
-//reorderECOND(Orbit);
-//
-//reorderECOND(cbBX);
-//
-//reorderECOND(cbOrbit);
-
-
-// ------------------------------------------------------------
-// 7. Verify sorting
-// ------------------------------------------------------------
-
-for (size_t i = 1; i < nECOND; ++i) {
-
-    if (cbIdx[i] < cbIdx[i - 1] ||
-        (cbIdx[i] == cbIdx[i - 1] &&
-         ECONDidx[i] < ECONDidx[i - 1])) {
-
-        throw cms::Exception("SortingError")
-            << "ECOND sorting failed at index " << i;
-    }
-}
-
-
-// ------------------------------------------------------------
-// 8. Print sorted ECOND information
-// ------------------------------------------------------------
-
-std::cout << "\n============================================\n";
-
-std::cout << "ECOND DATA AFTER SORTING\n";
-
-std::cout << "Total ECOND entries: " << nECOND << "\n";
-
-std::cout << "============================================\n";
-
-std::cout << "Index\tCBId\tECONDid\tnErx\tPayload\tPassThrough\n";
-
-for (size_t i = 0; i < nECOND; ++i) {
-
-    std::cout
-        << i << "\t"
-        << cbIdx[i] << "\t"
-        << ECONDidx[i] << "\t"
-        << nErx[i] << "\t"
-        << payloadLength[i] << "\t"
-        << static_cast<bool>(econdPassThrough[i])
-        << "\n";
-}
-
-std::cout << "============================================\n";
-
-std::cout << "ECOND sorting completed successfully!\n";
-
-std::cout << "============================================\n";
-
-*/
-
-  
-  
-
-
-  /////////////// eRx payload + header generation   (ECOND packet inside CB) ///////////////
-/*
-  std::vector<uint32_t> econdPacket{0};  
-  std::vector<uint32_t> CRC_calc{0};
-  std::vector<uint32_t> crcvec;
-  econdPacket.clear();
-  int econdIdx = 0;
-  uint16_t header =  340;//170;
-  bool passThrough;
-  //bool passThrough1 = false;
-  //std::vector<bool> passThrough1{false, false, false,false,false,false,false,false,false,true,false,false,}; //for configuration 11LD, 1 Scint module
-  //std::vector<bool> passThrough1{false, false, false,false,false,false,false,false,true,false,false,}; //for configuration 10LD, 1 Scint module
-  uint8_t ht = 0;
-  uint8_t ebo = 0;
-  uint8_t ehHam = 9;
-  uint8_t rr = 0;
-  uint8_t stat = 7;
-  uint8_t Ham = 0;
-  bool bitE = true;
-  //bool passZS = true;
-  //bool passZSm1 = false;
-  //bool hasToA = false;
-  bool charMode = false;
-  uint8_t econCrc = 0;
-  int ECOND_counter = 0;
-  int CB_idx = 0;
-  uint32_t padding = 0;
-  int moduleNum = 0;
-
-
-  std::map<uint32_t, uint32_t> count;
-  std::vector<uint32_t> enabledECOND;
-
-  for (int x : cbIdx) {
-      count[x]++;
-  }
-
-  for (auto [number, frequency] : count) {
-      enabledECOND.push_back(frequency);
-      
-  }
-
-  
-//===============ooooooooooooOOOOOOOOOOOOOOOOOOOOOoooooooooooooooooooOOOOOOOOOOOOOOOOOOOOoooooooo==================
-//================oooOOOOOOOOOOOOOOOOOO Payload length calculation from eRx data OOOOOOOOOOOOOOOOOOOooooooo================
-
-  std::vector<uint16_t> CalculatedPayloadLength;
-  CalculatedPayloadLength.clear();
-  std::vector<uint32_t> dataWords;
-  size_t moduleNum1 = 0;
-  size_t moduleCountr = 0;
-  std::vector<bool> packingParameter;
-  for(size_t erx = 0; erx < allERxData.size(); ++erx){
-
-    uint32_t eRxSum = std::accumulate(nErx.begin(), nErx.begin() + moduleNum1, uint32_t{0});
-    passThrough = econdPassThrough[moduleCountr];//passThrough1[moduleCountr];
-    
-    if(erx == 0 or erx == eRxSum){
-      //cout << "erx: " << erx << " ErxSum: " << eRxSum << endl;
-      if(erx != 0){      
-        CalculatedPayloadLength.push_back(dataWords.size()); 
-      }
-      dataWords.clear();
-      moduleNum1++;
-    }
-    bool eRxPresent = std::any_of(
-      enableMaps[erx].begin(),
-      enableMaps[erx].end(),
-      [](bool enabled) { return enabled; }
-      );
-
-      if (!eRxPresent) {
-          bitE = false;
-          //passThrough = false;
-          const auto eRxheader = hgcal::econd::eRxSubPacketHeader(stat, Ham, bitE, cm0[erx], cm1[erx], enableMaps[erx]);  //eRx Header for each eRX
-          dataWords.push_back(eRxheader[0]);  
-
-      } else{
-        //bitE = false;
-        //passThrough = false;
-
-          const auto eRxheader = hgcal::econd::eRxSubPacketHeader(stat, Ham, bitE, cm0[erx], cm1[erx], enableMaps[erx]);  //eRx Header for each eRX
-          dataWords.push_back(eRxheader[0]);      
-          dataWords.push_back(eRxheader[1]);
-
-          const auto erx_chan_data = hgcal::econd::produceERxData(enableMaps[erx], allERxData[erx],  charMode, passThrough);  // passZS, passZSm1, hasToA, eRx data for each eRX
-          for(size_t ch = 0; ch < erx_chan_data.size(); ++ch){
-            dataWords.push_back(erx_chan_data[ch]);
-          }
-        }
-
-      if(erx == eRxSum-1){
-        moduleCountr++;
-      }
-      if(erx==allERxData.size()-1){
-        CalculatedPayloadLength.push_back(dataWords.size());
-      }
-      
-  }
-
-//cout << "Total number of ECONDs: " << ECONDidx.size() << " nErx size: " << nErx.size() << " cbIdx size: " << cbIdx.size() << " fedID size: " << fedID.size() << "  payloadLengh size: " << payloadLength.size() <<  endl;
-//
-//  cout << std::left
-//     << std::setw(10) << "nErx"
-//     << std::setw(10) << "ECONDidx"
-//     << std::setw(10) << "cbIdx"
-//     << std::setw(10) << "SLinkIdx"
-//     << std::setw(10) << "FedId"
-//     << std::setw(10) << "payloadLength"
-//     << std::setw(25) << "econdPassThrough"
-//     << '\n';
-//  for(size_t i = 0; i < nErx.size(); i++){
-//    cout << std::left
-//       << std::setw(10) << nErx[i]
-//       << std::setw(10) << ECONDidx[i]
-//       << std::setw(10) << cbIdx[i]
-//       << std::setw(10) << SLinkIdx[i]
-//       << std::setw(10) << fedID[i]
-//       << std::setw(10) << payloadLength[i]
-//       << std::setw(25) << econdPassThrough[i]
-//       << '\n';
-//  }
-
-
-
-//ooooooooooOOOOOOOOOOOOOOOOOOOOOOOOO==========================+OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOooooooooooooooooooooooooooo
-
-
-  for(size_t erx = 0; erx < allERxData.size(); ++erx){   //looping over all eRx
-
-    uint32_t eRxSum = std::accumulate(nErx.begin(), nErx.begin() + moduleNum, uint32_t{0});
-    if(erx == 0 or erx == eRxSum){  
-      CRC_calc.clear();
-
-    ///////////////ooooooooooooOOOOOOOOOOOOOOOOO CB Header OOOOOOOOOOOOOOoooooooooooooooooooo///////////////////
-    //cout << " ========ooooooOOOOOOOOOOOOOO CB Header Started OOOOOOOOOOOOOOoooooooooooooooooooo==================" << endl;
-      if((erx == 0) or (cbIdx[ECOND_counter] != cbIdx[ECOND_counter-1]) or ECOND_counter % 12 == 0){
-          std::vector<uint8_t> econd_status(12, hgcal::backend::ECONDPacketStatus::InactiveECOND);
-          //cout << "Check point 1 " << endl;
-          for(size_t enableEcon = 0; enableEcon < enabledECOND[CB_idx]; enableEcon++){
-            econd_status[enableEcon]     = hgcal::backend::ECONDPacketStatus::Normal;
-            //econd_status[1]     = hgcal::backend::ECONDPacketStatus::Normal;
-          }
-          
-          //econd_status[2 * CB_idx]     = hgcal::backend::ECONDPacketStatus::Normal;
-          //econd_status[2 * CB_idx + 1] = hgcal::backend::ECONDPacketStatus::Normal;
-          //cout << "Check point 2 " << endl;
-          //if(cbBX.size() <= CB_idx){
-          //  //cout << "Check point 3 " << endl;
-          //  throw cms::Exception("IndexOutOfRange")
-          //      << "CB index is out of range!";
-          //}
-          uint32_t evt = eventNum;
-          auto cbHeader =
-          hgcal::backend::buildCaptureBlockHeader(
-              cbBX[enabledECOND[CB_idx]-1],
-              evt,
-              cbOrbit[enabledECOND[CB_idx]-1],
-              econd_status);
-
-          uint32_t CAPTUREBLOCK_RESERVED_POS = 25;
-          uint32_t CAPTUREBLOCK_RESERVED_MASK = 0x7f;
-          uint32_t value = 0x7f;
-
-          cbHeader[0] &= ~(CAPTUREBLOCK_RESERVED_MASK << CAPTUREBLOCK_RESERVED_POS);
-
-          cbHeader[0] |= ((value & CAPTUREBLOCK_RESERVED_MASK) << CAPTUREBLOCK_RESERVED_POS);
-          econdPacket.push_back(cbHeader[0]);
-          econdPacket.push_back(cbHeader[1]);
-          //ECOND_counter = 0;
-          CB_idx++;
-        }
-
-      passThrough = econdPassThrough[econdIdx];//passThrough1[econdIdx];
-
-      //cout << " ========ooooooOOOOOOOOOOOOOO ECOND Header Started OOOOOOOOOOOOOOoooooooooooooooooooo==================" << endl;
-
-
-      auto econdHeader = hgcal::econd::eventPacketHeader(header,
-                                                        CalculatedPayloadLength[econdIdx]+1,//payloadLength[econdIdx], 
-                                                        passThrough,
-                                                        true,
-                                                        ht,
-                                                        ebo,
-                                                        true,
-                                                        false,
-                                                        ehHam,
-                                                        BX[econdIdx],
-                                                        L1A[econdIdx],
-                                                        Orbit[econdIdx],
-                                                        false,
-                                                        rr);
-        
-      econdHeader[1] |= (econCrc & hgcal::ECOND_FRAME::EHCRC_MASK) << hgcal::ECOND_FRAME::EHCRC_POS;
-
-      econdPacket.push_back(econdHeader[0]);  //filling EcondHeaders
-      econdPacket.push_back(econdHeader[1]);
-      econdIdx++;
-      ECOND_counter++;
-      moduleNum++;
-      }
-
-      bool eRxPresent = std::any_of(
-      enableMaps[erx].begin(),
-      enableMaps[erx].end(),
-      [](bool enabled) { return enabled; }
-      );
-
-      if (!eRxPresent) {
-          bitE = false;
-          //passThrough = false;
-          const auto eRxheader = hgcal::econd::eRxSubPacketHeader(stat, Ham, bitE, cm0[erx], cm1[erx], enableMaps[erx]);  //eRx Header for each eRX
-          econdPacket.push_back(eRxheader[0]);   //filling ERxHeaders 
-          CRC_calc.push_back(eRxheader[0]);  
-
-      } else{
-        //bitE = false;
-        //passThrough = false;
-
-          const auto eRxheader = hgcal::econd::eRxSubPacketHeader(stat, Ham, bitE, cm0[erx], cm1[erx], enableMaps[erx]);  //eRx Header for each eRX
-          econdPacket.push_back(eRxheader[0]);     //filling ERxHeaders 
-          econdPacket.push_back(eRxheader[1]);
-
-          CRC_calc.push_back(eRxheader[0]);      
-          CRC_calc.push_back(eRxheader[1]);
-
-          const auto erx_chan_data = hgcal::econd::produceERxData(enableMaps[erx], allERxData[erx],  charMode, passThrough);  //eRx data for each eRX
-          for(size_t ch = 0; ch < erx_chan_data.size(); ++ch){
-            econdPacket.push_back(erx_chan_data[ch]);   //filling eRx payload(channel data)
-            CRC_calc.push_back(erx_chan_data[ch]);
-          }
-        }
-
-  ////// ooooooooooOOOOOOOOOOOOOOOOO CRC Computation (ECOND Tailer) OOOOOOOOOOOOOOoooooooooooooo /////////////////////////
-
-      if(erx+1 == eRxSum){
-        crcvec.assign(CRC_calc.begin(), CRC_calc.end());
-        std::transform(crcvec.begin(), crcvec.end(), crcvec.begin(), [](uint32_t w) {
-        return ((w << 24) & 0xFF000000) | ((w << 8) & 0x00FF0000) | ((w >> 8) & 0x0000FF00) |
-              ((w >> 24) & 0x000000FF);  //swapping endianness
-        });
-
-        auto array = &(crcvec[0]);
-        auto bytes = reinterpret_cast<const unsigned char *>(array);
-        auto crc32 = boost::crc<32,
-                             hgcal::ECOND_FRAME::CRC_POL,
-                             hgcal::ECOND_FRAME::CRC_INITREM,
-                             hgcal::ECOND_FRAME::CRC_FINALXOR,
-                             false,
-                             //false>(bytes, (payloadLength[econdIdx-1]-1) * 4);
-                             false>(bytes, (CalculatedPayloadLength[econdIdx-1]) * 4);  //need to be checked !!!!!
-
-
-        if((CRC_calc.size() + 1) % 2 != 0){
-          econdPacket.push_back(crc32);
-          econdPacket.push_back(padding);  //padding word
-
-          //econdPayloadCheck.push_back(crc32);
-        }else{
-          econdPacket.push_back(crc32);
-          //econdPayloadCheck.push_back(crc32);
-        }
-      }
-
-    }
-
-
-  /////////////oooooooooooOOOOOOOOOOOO SLink Packet OOOOOOOOOOOOOOOOoooooooooooooooo////////////////
-
-size_t payloadBytes = econdPacket.size() * sizeof(uint32_t);
-
-size_t remainder = payloadBytes % 16;
-if (remainder != 0) {
-    size_t paddingBytes = 16 - remainder;
-    // Since each vector element is 4 bytes
-    size_t paddingWords = paddingBytes / sizeof(uint32_t);
-
-    for (size_t i = 0; i < paddingWords; ++i) {
-        econdPacket.push_back(0);
-    }
-}
-
-for (size_t i = 0; i + 1 < econdPacket.size(); i += 2) {
-    std::swap(econdPacket[i], econdPacket[i + 1]);       // To get the correct sequence of the data wwords in the payload as in original raw data
-  }
-
-size_t payloadBytes_afterPadding = econdPacket.size() * sizeof(uint32_t);
-size_t totalSize = sizeof(SLinkRocketHeader_v3) + econdPacket.size() * sizeof(uint32_t) + sizeof(SLinkRocketTrailer_v3);
-uint32_t sid = 1601;
-uint8_t emu_status = 0;
-uint16_t l1a_types = 132;
-uint8_t l1a_phys = 0;
-uint64_t global_event_id = 0;//fedL1A[0];
-uint16_t status = 4;
-uint16_t crc = 57005;
-uint16_t daqcrc = 57005;
-uint16_t fedBX = 0;//fedBX[0];
-uint32_t fedObt = 0;//fedObt[0];
-
-//unsigned char srcData[totalSize];
-
-constexpr size_t hdrsize = sizeof(SLinkRocketHeader_v3);
-constexpr size_t trsize  = sizeof(SLinkRocketTrailer_v3);
-
-//cout << "ECOND packetSize: " << econdPacket.size() << "  payloadBytes: "  << econdPacket.size() * sizeof(uint32_t) << "  totalSize: " << totalSize << endl;
-
-unsigned char slinkPacket[totalSize];
-std::memset(slinkPacket, 0, totalSize);
- 
-auto sh0 = new ((void*)slinkPacket) SLinkRocketHeader_v3(sid, l1a_types, l1a_phys, emu_status, global_event_id);
-
-//std::memcpy(
-//    slinkPacket.data() + hdrsize,
-//    slinkPayload.data(),
-//    payloadBytes);
-std::memcpy(
-    slinkPacket + hdrsize,
-    econdPacket.data(),
-    payloadBytes);
-
-auto st0 = new ((void*)(slinkPacket+hdrsize+payloadBytes_afterPadding)) 
-    SLinkRocketTrailer_v3(status, crc, fedObt, fedBX, totalSize >> SLR_WORD_NUM_BYTES_SHIFT, daqcrc);
-
-
-auto rawDataBuffer = std::make_unique<RawDataBuffer>(totalSize);
-
-rawDataBuffer->addSource(sid, slinkPacket, totalSize);
-
-iEvent.put(rawDataBufferPutToken_, std::move(rawDataBuffer));
-
-*/
 
 struct ECONDInfo {
     uint32_t nErx;
-    uint16_t payloadLength;
+    uint16_t payloadLength, ECOND_BX, ECOND_L1A;
+    uint8_t ECOND_Orbit;
     bool passThrough;
 
     size_t StartIndex;
@@ -1119,6 +562,9 @@ for (size_t i = 0; i < nErx.size(); ++i) {
     info.nErx         = nErx[i];
     info.payloadLength = payloadLength[i];
     info.passThrough  = econdPassThrough[i];
+    info.ECOND_BX     = BX[i];
+    info.ECOND_L1A    = L1A[i];
+    info.ECOND_Orbit  = Orbit[i];
 
     info.StartIndex = StartIndex;
     info.rowIndex   = i;
@@ -1135,35 +581,238 @@ for (size_t i = 0; i < nErx.size(); ++i) {
 }
 
 
-for (const auto& fedPair : fedMap) {
+std::vector<uint32_t> econdPacket{0};  
+std::vector<uint32_t> CRC_calc;
+std::vector<uint32_t> crcvec;
+uint16_t header =  340;//170;
+uint8_t ht = 0;
+uint8_t ebo = 0;
+uint8_t ehHam = 9;
+uint8_t rr = 0;
+uint8_t stat = 7;
+uint8_t Ham = 0;
+bool bitE = true;
+bool charMode = false;
+uint8_t econCrc = 0;
+uint32_t padding = 0;
+uint32_t cbIdxCounter = 0;
+//std::vector<uint8_t> econd_status(12, hgcal::backend::ECONDPacketStatus::InactiveECOND);
+struct SLinkPacketInfo {
+    uint32_t fedId;
+    std::vector<unsigned char> packet;
+};
+std::vector<SLinkPacketInfo> allSLinkPackets;
+size_t totalBufferSize = 0;
 
+for (const auto& fedPair : fedMap) {
+    econdPacket.clear();
     uint32_t fed = fedPair.first;
 
     for (const auto& cbPair : fedPair.second) {
-
+        //econd_status.clear();
         uint32_t cb = cbPair.first;
+        for(size_t enableEcon = 0; enableEcon < cbPair.second.size(); enableEcon++){
+          econd_status[enableEcon] = hgcal::backend::ECONDPacketStatus::Normal;
+          //econd_status[1]     = hgcal::backend::ECONDPacketStatus::Normal;
+        }
 
+        auto cbHeader = hgcal::backend::buildCaptureBlockHeader(cbBX[cbIdxCounter],
+                                                                cbOrbit[cbIdxCounter],//evt,
+                                                                cbOrbit[cbIdxCounter],
+                                                                econd_status);
+        uint32_t CAPTUREBLOCK_RESERVED_POS = 25;
+        uint32_t CAPTUREBLOCK_RESERVED_MASK = 0x7f;
+        uint32_t value = 0x7f;
+        cbHeader[0] &= ~(CAPTUREBLOCK_RESERVED_MASK << CAPTUREBLOCK_RESERVED_POS);
+        cbHeader[0] |= ((value & CAPTUREBLOCK_RESERVED_MASK) << CAPTUREBLOCK_RESERVED_POS);
+        econdPacket.push_back(cbHeader[0]);
+        econdPacket.push_back(cbHeader[1]);
+        cbIdxCounter += cbPair.second.size();
+        
         for (const auto& econdPair : cbPair.second) {
 
             uint32_t econd = econdPair.first;
 
             const auto& info = econdPair.second;
 
-            cout << "FED: " << fed
-                 << ", CB: " << cb
-                 << ", ECOND: " << econd
-                 << ", nErx: " << info.nErx
-                 << ", payloadLength: " << info.payloadLength
-                 << ", passThrough: " << info.passThrough
-                 << ", StartIndex: " << info.StartIndex
-                 << ", rowIndex: " << info.rowIndex
-                 << std::endl;
-            // Pack the corresponding ECOND and its eRx entries.
+            if(info.payloadLength > 469) {
+                throw std::runtime_error("Payload length exceeds maximum allowed size for ECOND packet");
+              continue;  //skip ECOND which exceeds maximum payload length
 
+            }
+
+            auto econdHeader = hgcal::econd::eventPacketHeader(header,
+                                                               info.payloadLength, 
+                                                               info.passThrough,
+                                                               true,
+                                                               ht,
+                                                               ebo,
+                                                               true,
+                                                               false,
+                                                               ehHam,
+                                                               info.ECOND_BX,
+                                                               info.ECOND_L1A,
+                                                               info.ECOND_Orbit,
+                                                               false,
+                                                               rr);
+            
+            econdHeader[1] |= (econCrc & hgcal::ECOND_FRAME::EHCRC_MASK) << hgcal::ECOND_FRAME::EHCRC_POS;
+            econdPacket.push_back(econdHeader[0]);  //filling EcondHeaders
+            econdPacket.push_back(econdHeader[1]);                                                              
+
+            for (size_t j = 0; j < info.nErx; ++j) {
+
+                size_t eRxIndex = info.StartIndex + j;
+
+                const auto& erxData = allERxData.at(eRxIndex);
+                const auto& enabledChannels = enableMaps.at(eRxIndex);
+
+                bool eRxPresent = std::any_of(enabledChannels.begin(),
+                                              enabledChannels.end(),
+                                              [](bool enabled) { return enabled; }
+                                              );
+                
+                if (!eRxPresent) {
+                  bitE = false;
+                  const auto eRxheader = hgcal::econd::eRxSubPacketHeader(stat, Ham, bitE, cm0[eRxIndex], cm1[eRxIndex], enabledChannels);  //eRx Header for each eRX
+                  econdPacket.push_back(eRxheader[0]);   //filling ERxHeaders 
+                  CRC_calc.push_back(eRxheader[0]);                    
+                } else{       
+                    const auto eRxheader = hgcal::econd::eRxSubPacketHeader(stat, Ham, bitE, cm0[eRxIndex], cm1[eRxIndex], enabledChannels);  //eRx Header for each eRX
+                    econdPacket.push_back(eRxheader[0]);     //filling ERxHeaders 
+                    econdPacket.push_back(eRxheader[1]);
+                          
+                    CRC_calc.push_back(eRxheader[0]);      
+                    CRC_calc.push_back(eRxheader[1]);
+                          
+                    const auto erx_chan_data = hgcal::econd::produceERxData(enabledChannels, erxData,  charMode, info.passThrough);  //eRx data for each eRX
+                    for(size_t ch = 0; ch < erx_chan_data.size(); ++ch){
+                      econdPacket.push_back(erx_chan_data[ch]);   //filling eRx payload(channel data)
+                      CRC_calc.push_back(erx_chan_data[ch]);
+                    }
+                  }
+                } //eRx loop ending
+
+        crcvec.assign(CRC_calc.begin(), CRC_calc.end());
+        std::transform(crcvec.begin(), crcvec.end(), crcvec.begin(), [](uint32_t w) {
+        return ((w << 24) & 0xFF000000) | ((w << 8) & 0x00FF0000) | ((w >> 8) & 0x0000FF00) |
+              ((w >> 24) & 0x000000FF);  //swapping endianness
+        });
+
+        auto array = &(crcvec[0]);
+        auto bytes = reinterpret_cast<const unsigned char *>(array);
+        auto crc32 = boost::crc<32,
+                             hgcal::ECOND_FRAME::CRC_POL,
+                             hgcal::ECOND_FRAME::CRC_INITREM,
+                             hgcal::ECOND_FRAME::CRC_FINALXOR,
+                             false,
+                             //false>(bytes, 0 * 4);
+                             false>(bytes, CRC_calc.size() * 4);  //need to be checked !!!!!
+        
+        if((CRC_calc.size() + 1) % 2 != 0){
+          econdPacket.push_back(crc32);
+          econdPacket.push_back(padding);  //padding word
+        }else{
+          econdPacket.push_back(crc32);
         }
-    }
+
+        //cout << "Calculate Payload Length: " << CRC_calc.size() << "  ECOND Payload Length: " << info.payloadLength  << endl;
+
+        CRC_calc.clear();
+
+        } // ECOND loop ending
+    } // CB loop ending
+
+  /////////////oooooooooooOOOOOOOOOOOO SLink Packet OOOOOOOOOOOOOOOOoooooooooooooooo////////////////
+
+  for (size_t i = 0; i + 1 < econdPacket.size(); i += 2) {
+      std::swap(econdPacket[i], econdPacket[i + 1]);       // To get the correct sequence of the data words
+  }
+
+  size_t payloadBytes = econdPacket.size() * sizeof(uint32_t);
+
+  size_t remainder = payloadBytes % 16;
+  if (remainder != 0) {
+      size_t paddingBytes = 16 - remainder;
+      // Since each vector element is 4 bytes
+      size_t paddingWords = paddingBytes / sizeof(uint32_t);
+
+      for (size_t i = 0; i < paddingWords; ++i) {
+          econdPacket.push_back(0);
+      }
+  }
+
+  size_t payloadBytes_afterPadding = econdPacket.size() * sizeof(uint32_t);
+  size_t totalSize = sizeof(SLinkRocketHeader_v3) + econdPacket.size() * sizeof(uint32_t) + sizeof(SLinkRocketTrailer_v3);
+  //uint32_t sid = 1601;
+  uint8_t emu_status = 0;
+  uint16_t l1a_types = 132;
+  uint8_t l1a_phys = 0;
+  uint64_t global_event_id = 0;//fedL1A[0];
+  uint16_t status = 4;
+  uint16_t crc = 57005;
+  uint16_t daqcrc = 57005;
+  uint16_t fedBX = 0;//fedBX[0];
+  uint32_t fedObt = 0;//fedObt[0];
+
+  //unsigned char srcData[totalSize];
+
+  constexpr size_t hdrsize = sizeof(SLinkRocketHeader_v3);
+  constexpr size_t trsize  = sizeof(SLinkRocketTrailer_v3);
+
+  //cout << "ECOND packetSize: " << econdPacket.size() << "  payloadBytes: "  << econdPacket.size() * sizeof(uint32_t) << "  totalSize: " << totalSize << endl;
+
+  //unsigned char slinkPacket[totalSize];
+  //std::memset(slinkPacket, 0, totalSize);
+  std::vector<unsigned char> slinkPacket(totalSize, 0);
+  
+  //auto sh0 = new ((void*)slinkPacket) SLinkRocketHeader_v3(fed, l1a_types, l1a_phys, emu_status, global_event_id);
+  auto sh0 = new (static_cast<void*>(slinkPacket.data())) SLinkRocketHeader_v3(fed, l1a_types, l1a_phys, emu_status, global_event_id);
+  std::memcpy(
+    slinkPacket.data() + hdrsize,
+    econdPacket.data(),
+    payloadBytes_afterPadding
+  );
+  //std::memcpy(
+  //    slinkPacket + hdrsize,
+  //    econdPacket.data(),
+  //    payloadBytes);
+
+  auto st0 = new (
+    static_cast<void*>(slinkPacket.data() + hdrsize + payloadBytes_afterPadding)) SLinkRocketTrailer_v3(status, crc, fedObt, fedBX, totalSize >> SLR_WORD_NUM_BYTES_SHIFT, daqcrc);
+
+  totalBufferSize += slinkPacket.size();
+
+  if (totalBufferSize > std::numeric_limits<uint32_t>::max()) {
+    throw cms::Exception("RawDataBuffer")
+        << "Total SLink packet size exceeds uint32_t capacity";
+  }
+
+  allSLinkPackets.push_back(
+      {fed, std::move(slinkPacket)}
+  );
+  
+} // FED loop ending
+
+auto rawDataBuffer = std::make_unique<RawDataBuffer>(
+                     static_cast<uint32_t>(totalBufferSize));
+    
+for (const auto& packetInfo : allSLinkPackets) {
+
+    uint32_t fed = packetInfo.fedId;
+
+    const auto& packet = packetInfo.packet;
+
+    uint32_t packetSize = static_cast<uint32_t>(packet.size());
+
+    rawDataBuffer->addSource(
+        fed,
+        packet.data(),
+        packetSize
+    );
 }
 
+iEvent.put(rawDataBufferPutToken_, std::move(rawDataBuffer));
 
 }
 
